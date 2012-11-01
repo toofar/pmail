@@ -278,7 +278,6 @@ if atts and len(atts) > 0:
 # TODO: SSL:
 # https://github.com/wes1138/SviMTP/blob/master/after/ftplugin/mail_svimtp.vim#L221
 s = smtplib.SMTP(smtpserver, port or 25)
-s.set_debuglevel(True)
 s.sendmail(msg['from'], rcpts, msg.as_string())
 s.quit()
 
