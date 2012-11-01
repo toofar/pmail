@@ -1,0 +1,284 @@
+#!/usr/bin/env python
+from __future__ import with_statement
+
+"""
+pmail -- command line SMTP interface.
+
+You can feed pmail a pre-constructed email message on stdin. You can
+also specify any relevant header values on the command line. Anything on the
+command line takes precedence over values in vmailrc (or on stdin in the case
+of 'From:'). Most command line arguments can be specified multiple
+times.
+
+If any of the necessary values (To, From, Subject, Body) are missing an
+editor will be called up to give you a chance to edit the message. If
+you wan't to open up an editor even
+if you have provided all the values use the -e|--editor argument.
+
+If you don't want an editor to open up at any time use the
+-n|--no-editor argument. If you provide at a minimum To, From and
+(Subject or Body) then the email will (hopefully) be sent. Otherwise the
+file will be saved to a file in /tmp for you to examine.
+
+The BCC and Attach headers in the editor are never sent. They are just so you
+can add a BCC list and attachments from a text editor.
+
+-t|--to and the positional argument do the same thing, except -t can be
+specified mutiple times. They can both be present on the same command.
+
+Currently doesn't support SSL.
+"""
+
+# Parse INI
+import ConfigParser
+import os
+import sys
+
+# Set config
+config_file = os.environ.get('HOME') + '/.vmailrc'
+
+if os.path.isfile(config_file):
+    smtpserver, port, from_addr, password = False, False, False, False
+else: 
+    print >> sys.stderr, '''
+    Error: $HOME/.vmailrc does not exist.
+    '''
+    exit(1)
+
+config_defaults = {'smtpserver':None,
+                   'port':None,
+                   'realname':None,
+                   'from_addr':None}
+conf = ConfigParser.SafeConfigParser(defaults=config_defaults)
+conf.read(config_file)
+smtpserver = conf.get('vmail', 'smtp_url') 
+port        = conf.get('vmail', 'port')
+from_addr   = conf.get('vmail', 'from')
+if conf.get('vmail', 'realname'):
+    from_addr   = '"'+conf.get('vmail', 'realname')+'" <'+from_addr+'>'
+
+
+import argparse
+# Added RawTextHelpFormatter which means we have to do manual string wrapping
+# but get to keep our line breaks.
+#parser = argparse.ArgumentParser(description='Upload to TaitHub.',
+#                                 formatter_class=argparse.RawTextHelpFormatter)
+helpmsg="""
+Required values are To, From, Body and Subject. (If you pass the
+--no-editor argument you only need one of Body and Subject.)
+
+If one of these values are missing (or you passed the --editor argument)
+then the message will be opened up in an editor before sending.
+"""
+parser = argparse.ArgumentParser(description=helpmsg,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument('dest_addr', help='Destination Address',
+                    metavar='foo@example.com', nargs='?',
+                    default=argparse.SUPPRESS, action='append')
+parser.add_argument('-t', '--to', help='Destination Address. Can be '+
+                   'specified multiple times.', action='append',
+                    metavar='foo@example.com', dest='dest_addr')
+parser.add_argument('-s', '--subject', help='Subject',
+                    metavar='"New TPS Report Templates"')
+parser.add_argument('-a', '--attach',
+                    help='Filename to attach. Can be specified multiple times.',
+                    metavar='/path/to/TPS.pdf', action='append')
+parser.add_argument('-c' ,'--cc',
+                    help='CC Address. Can be specified multiple times.',
+                    metavar='foo@example.com', action='append')
+parser.add_argument('-b', '--bcc',
+                    help='BCC Address. Can be specified multiple times.',
+                    metavar='foo@example.com', action='append')
+parser.add_argument('-f', '--from',
+                    help='From address. For From header and envelope.'+
+                    ' Overrides vmailrc.', metavar='me@example.com',
+                    dest='from_addr')
+parser.add_argument('--server', help='SMTP server hostname. Overrides vmailrc',
+                    metavar='smtp.example.com[:124]')
+parser.add_argument('-e','--editor', help='Open message in editor before '+
+                    'sending. Even if all the required values are present.',
+                    metavar='myeditor', nargs='?', default='default')
+parser.add_argument('-n','--no-editor', help="Don't open an editor if the "+
+                    "message is missing a required value."
+                    , action='store_true', default=False)
+
+args = parser.parse_args()
+
+if args.server:
+    if ':' in args.server:
+        smtpserver, port = args.server.split(':')
+    else:
+        smtpserver = args.server
+
+if not smtpserver:
+    print >> sys.stderr, "No server specified in args or config file, can't proceed."
+    exit(1)
+
+if args.from_addr:
+    from_addr = args.from_addr
+
+EDITOR=os.environ.get('EDITOR','editor')
+if args.editor and args.editor != 'default':
+    EDITOR = args.editor
+
+
+#  * read from stdin and construct message
+
+import smtplib
+from email.parser import Parser
+from email.message import Message
+
+msg = Message()
+if not os.isatty(0):
+    msg = Parser().parse(sys.stdin)
+sys.stdin = open('/dev/tty')
+
+#  * try to fill in message headers from the args
+#    To, From, Subject should always be present even if we havn't got
+#    values for them yet. This way thay will show up in the editor.
+
+if args.dest_addr:
+    msg['To'] = ", ".join(args.dest_addr)
+if 'to' not in msg:
+    msg['To'] = ""
+
+if from_addr:
+    if 'from' in msg:
+        del msg['from']
+    msg['From'] = from_addr
+if 'from' not in msg:
+    msg['From'] = ""
+
+if args.subject:
+    if 'subject' in msg:
+        del msg['subject']
+    msg['Subject'] = args.subject
+if 'subject' not in msg:
+    msg['Subject'] = ""
+
+# to, from, subject, attach, cc, bcc
+if args.cc:
+    for i in args.cc:
+        msg['CC'] = i
+if args.bcc:
+    for i in args.bcc:
+        msg['BCC'] = i
+if args.attach:
+    for i in args.attach:
+        msg['Attach'] = i
+
+def can_send(msg, args):
+    if args.no_editor:
+        return msg['to'] and msg['from'] and (msg.get_payload() or
+                                                  msg['subject'])
+    else:
+        return msg['to'] and msg['from'] and msg.get_payload() and\
+                                                  msg['subject']
+#  * Write to tmpfile and open up editor
+
+import tempfile
+if not args.no_editor and (not can_send(msg, args) or args.editor != 'default'):
+    from subprocess import call
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix='.mail') as temp:
+        temp.write(msg.as_string())
+        temp.flush()
+        call([EDITOR, temp.name],stdin=sys.stdin)
+        temp.seek(0)
+        if not temp.read(10):
+            print >> sys.stderr, "Empty message, aborting."
+            exit(0)
+        temp.seek(0)
+        msg = Parser().parse(temp)
+
+if not can_send(msg, args):
+    if not msg['to']:
+        print >> sys.stderr, "Warning: 'To' header is missing."
+    if not msg['from']:
+        print >> sys.stderr, "Warning: 'From' header is missing."
+    if not msg['subject']:
+        print >> sys.stderr, "Warning: 'Subject' header is missing."
+    if not msg.get_payload():
+        print >> sys.stderr, "Warning: message body is missing."
+    print >> sys.stderr, "Cannot proceed with this little information."
+    with tempfile.NamedTemporaryFile(suffix='.mail',delete=False) as temp:
+        temp.write(msg.as_string())
+        temp.flush()
+        print >> sys.stderr, "You can find the rejected message at",temp.name
+    exit(1)
+
+notrcpts = msg.get_all('to',failobj=[]) +\
+           msg.get_all('cc',failobj=[]) +\
+           msg.get_all('bcc',failobj=[])
+rcpts = []
+for r in notrcpts:
+    rcpts = rcpts + r.split(',')
+rcpts = [x.strip() for x in rcpts]
+del msg['bcc']
+
+atts = msg.get_all('attach')
+del msg['attach']
+
+# squash headers that can be specified multiple times. Not sure this is
+# necesary.
+for i in ['To','CC']:
+    if len(msg.get_all(i, [])) > 1:
+        l = msg.get_all(i)
+        del msg[i]
+        msg[i] = ", ".join(l)
+
+if atts and len(atts) > 0:
+    import glob as G
+    import mimetypes
+    from email.encoders import encode_base64
+    from email.mime.text import MIMEText
+    from email.mime.image import MIMEImage
+    from email.mime.audio import MIMEAudio
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.base import MIMEBase
+    msgmp = MIMEMultipart()
+    for k in msg.keys(): # steal the headers
+        msgmp[k] = msg[k]
+    msgmp.attach(MIMEText(msg.get_payload(),"plain","utf-8"))
+    # expand attachments paths
+    expanded = []
+    for a in atts:
+        a = os.path.expanduser(a)
+        expanded.extend(G.glob(a))
+    # create and attach
+    for att in expanded:
+        if not os.path.isfile(att):
+            # NOTE: this case should have been taken care of
+            # by the glob(...) above.
+            print >> sys.stderr, "Warning: " + att + " not found."
+            continue
+        ctype,encoding = mimetypes.guess_type(att)
+        if ctype is None or encoding is not None:
+            ctype = "application/octet-stream"
+        maintype,subtype = ctype.split("/",1)
+        with open(att,'rb') as f:
+            if maintype == "text":
+                aMsg = MIMEText(f.read(), _subtype=subtype)
+            elif maintype == "image":
+                aMsg = MIMEImage(f.read(), _subtype=subtype)
+            elif maintype == "audio":
+                aMsg = MIMEAudio(f.read(), _subtype=subtype)
+            else:
+                aMsg = MIMEBase(maintype, subtype)
+                aMsg.set_payload(f.read())
+                encode_base64(aMsg)
+
+        aMsg.add_header('Content-Disposition', 'attachment',
+            filename=os.path.basename(att))
+        msgmp.attach(aMsg)
+
+    # we no longer need the original msg, so just overwrite:
+    msg = msgmp
+
+# TODO: SSL:
+# https://github.com/wes1138/SviMTP/blob/master/after/ftplugin/mail_svimtp.vim#L221
+s = smtplib.SMTP(smtpserver, port or 25)
+s.set_debuglevel(True)
+s.sendmail(msg['from'], rcpts, msg.as_string())
+s.quit()
+
