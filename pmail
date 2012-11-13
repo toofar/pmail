@@ -6,7 +6,7 @@ pmail -- command line SMTP interface.
 
 You can feed pmail a pre-constructed email message on stdin. You can
 also specify any relevant header values on the command line. Anything on the
-command line takes precedence over values in vmailrc (or on stdin in the case
+command line takes precedence over values in pmailrc (or on stdin in the case
 of 'From:'). Most command line arguments can be specified multiple
 times.
 
@@ -35,13 +35,13 @@ import os
 import sys
 
 # Set config
-config_file = os.environ.get('HOME') + '/.vmailrc'
+config_file = os.environ.get('HOME') + '/.pmailrc'
 
 if os.path.isfile(config_file):
     smtpserver, port, from_addr, password = False, False, False, False
 else: 
     print >> sys.stderr, '''
-    Error: $HOME/.vmailrc does not exist.
+    Error: $HOME/.pmailrc does not exist.
     '''
     exit(1)
 
@@ -51,11 +51,11 @@ config_defaults = {'smtpserver':None,
                    'from_addr':None}
 conf = ConfigParser.SafeConfigParser(defaults=config_defaults)
 conf.read(config_file)
-smtpserver = conf.get('vmail', 'smtp_url') 
-port        = conf.get('vmail', 'port')
-from_addr   = conf.get('vmail', 'from')
-if conf.get('vmail', 'realname'):
-    from_addr   = '"'+conf.get('vmail', 'realname')+'" <'+from_addr+'>'
+smtpserver = conf.get('pmail', 'smtp_url') 
+port        = conf.get('pmail', 'port')
+from_addr   = conf.get('pmail', 'from')
+if conf.get('pmail', 'realname'):
+    from_addr   = '"'+conf.get('pmail', 'realname')+'" <'+from_addr+'>'
 
 
 import argparse
@@ -69,6 +69,12 @@ Required values are To, From, Body and Subject. (If you pass the
 
 If one of these values are missing (or you passed the --editor argument)
 then the message will be opened up in an editor before sending.
+
+Supports ~/.pmailrc file with contents ie:
+    [pmail]
+    from = me@example.com
+    realname = Joe User
+    smtp_url = smtp.example.com
 """
 parser = argparse.ArgumentParser(description=helpmsg,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -91,9 +97,9 @@ parser.add_argument('-b', '--bcc',
                     metavar='foo@example.com', action='append')
 parser.add_argument('-f', '--from',
                     help='From address. For From header and envelope.'+
-                    ' Overrides vmailrc.', metavar='me@example.com',
+                    ' Overrides pmailrc.', metavar='me@example.com',
                     dest='from_addr')
-parser.add_argument('--server', help='SMTP server hostname. Overrides vmailrc',
+parser.add_argument('--server', help='SMTP server hostname. Overrides pmailrc',
                     metavar='smtp.example.com[:124]')
 parser.add_argument('-e','--editor', help='Open message in editor before '+
                     'sending. Even if all the required values are present.',
