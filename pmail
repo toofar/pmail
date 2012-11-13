@@ -96,7 +96,8 @@ parser.add_argument('-b', '--bcc',
                     help='BCC Address. Can be specified multiple times.',
                     metavar='foo@example.com', action='append')
 parser.add_argument('-f', '--from',
-                    help='From address. For From header and envelope.'+
+                    help='From address for envelope. Sets From header '+
+                    'if absent from message.'+
                     ' Overrides pmailrc.', metavar='me@example.com',
                     dest='from_addr')
 parser.add_argument('--server', help='SMTP server hostname. Overrides pmailrc',
@@ -136,11 +137,14 @@ from email.message import Message
 
 msg = Message()
 if not os.isatty(0):
+    # If the first line(s) of stdin match "^[^\s|^:]+:" then Parser
+    # assumes that they are headers.
+    # If the first lines start with spaces, I think they are ignored.
     msg = Parser().parse(sys.stdin)
 sys.stdin = open('/dev/tty')
 
 #  * try to fill in message headers from the args
-#    To, From, Subject should always be present even if we havn't got
+#    To, From, Subject should always be present even if we haven't got
 #    values for them yet. This way thay will show up in the editor.
 
 if args.dest_addr:
@@ -149,9 +153,9 @@ if 'to' not in msg:
     msg['To'] = ""
 
 if from_addr:
-    if 'from' in msg:
-        del msg['from']
-    msg['From'] = from_addr
+    if 'from' not in msg:
+        msg['From'] = from_addr
+
 if 'from' not in msg:
     msg['From'] = ""
 
@@ -197,10 +201,14 @@ if not args.no_editor and (not can_send(msg, args) or args.editor != 'default'):
         temp.seek(0)
         msg = Parser().parse(temp)
 
+if not from_addr:
+    if 'from' in msg:
+        from_addr = msg['from']
+
 if not can_send(msg, args):
     if not msg['to']:
         print >> sys.stderr, "Warning: 'To' header is missing."
-    if not msg['from']:
+    if not from_addr:
         print >> sys.stderr, "Warning: 'From' header is missing."
     if not msg['subject']:
         print >> sys.stderr, "Warning: 'Subject' header is missing."
@@ -284,6 +292,10 @@ if atts and len(atts) > 0:
 # TODO: SSL:
 # https://github.com/wes1138/SviMTP/blob/master/after/ftplugin/mail_svimtp.vim#L221
 s = smtplib.SMTP(smtpserver, port or 25)
-s.sendmail(msg['from'], rcpts, msg.as_string())
+# TODO: Handle exceptions?
+refused = s.sendmail(from_addr, rcpts, msg.as_string())
 s.quit()
 
+if len(refused) > 0:
+    print "Some messages could not be delivered."
+    print refused
