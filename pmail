@@ -37,26 +37,19 @@ import sys
 # Set config
 config_file = os.environ.get('HOME') + '/.pmailrc'
 
+smtpserver, port, from_addr, password = False, False, False, False
 if os.path.isfile(config_file):
-    smtpserver, port, from_addr, password = False, False, False, False
-else: 
-    print >> sys.stderr, '''
-    Error: $HOME/.pmailrc does not exist.
-    '''
-    exit(1)
-
-config_defaults = {'smtpserver':None,
-                   'port':None,
-                   'realname':None,
-                   'from_addr':None}
-conf = ConfigParser.SafeConfigParser(defaults=config_defaults)
-conf.read(config_file)
-smtpserver = conf.get('pmail', 'smtp_url') 
-port        = conf.get('pmail', 'port')
-from_addr   = conf.get('pmail', 'from')
-if conf.get('pmail', 'realname'):
-    from_addr   = '"'+conf.get('pmail', 'realname')+'" <'+from_addr+'>'
-
+    config_defaults = {'smtpserver':None,
+                       'port':None,
+                       'realname':None,
+                       'from_addr':None}
+    conf = ConfigParser.SafeConfigParser(defaults=config_defaults)
+    conf.read(config_file)
+    smtpserver = conf.get('pmail', 'smtp_url') 
+    port        = conf.get('pmail', 'port')
+    from_addr   = conf.get('pmail', 'from')
+    if conf.get('pmail', 'realname'):
+        from_addr   = '"'+conf.get('pmail', 'realname')+'" <'+from_addr+'>'
 
 import argparse
 # Added RawTextHelpFormatter which means we have to do manual string wrapping
