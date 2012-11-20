@@ -35,16 +35,20 @@ import os
 import sys
 
 # Set config
-config_file = os.environ.get('HOME') + '/.pmailrc'
+config_file = os.path.expanduser('~/.pmailrc')
 
-smtpserver, port, from_addr, password = False, False, False, False
+smtpserver, port, from_addr, password, maildir = False, False, False, False, False
 if os.path.isfile(config_file):
     config_defaults = {'smtpserver':None,
                        'port':None,
                        'realname':None,
-                       'from_addr':None}
+                       'from_addr':None,
+                       'maildir':None}
     conf = ConfigParser.SafeConfigParser(defaults=config_defaults)
     conf.read(config_file)
+    maildir = conf.get('pmail', 'maildir') 
+    if maildir:
+        maildir = os.path.expanduser(maildir)
     smtpserver = conf.get('pmail', 'smtp_url') 
     port        = conf.get('pmail', 'port')
     from_addr   = conf.get('pmail', 'from')
@@ -282,6 +286,12 @@ if atts and len(atts) > 0:
     # we no longer need the original msg, so just overwrite:
     msg = msgmp
 
+# Date header, the MTA should add one, but we need it for
+# archiving localy. (See below)
+from email.Utils import formatdate
+if 'date' not in msg:
+    msg['Date'] = formatdate(localtime=True)
+
 # TODO: SSL:
 # https://github.com/wes1138/SviMTP/blob/master/after/ftplugin/mail_svimtp.vim#L221
 s = smtplib.SMTP(smtpserver, port or 25)
@@ -290,5 +300,34 @@ refused = s.sendmail(from_addr, rcpts, msg.as_string())
 s.quit()
 
 if len(refused) > 0:
-    print "Some messages could not be delivered."
-    print refused
+    print >> sys.stderr, "Some messages could not be delivered."
+    print >> sys.stderr, refused
+
+# save in maildir
+# from https://github.com/pazz/alot/blob/master/alot/account.py
+# see that if you want to support mbox dests too. (ie, add another
+# config file entry)
+import mailbox
+def store_mail(mbx, mail):
+    if not isinstance(mbx, mailbox.Mailbox):
+        print >> sys.stderr, 'Not a mailbox'
+        return False
+
+    mbx.lock()
+    if isinstance(mbx, mailbox.Maildir):
+        msg = mailbox.MaildirMessage(mail)
+        msg.set_flags('S')
+    else:
+        msg = mailbox.Message(mail)
+
+    try:
+        message_id = mbx.add(msg)
+        mbx.flush()
+        mbx.unlock()
+    except Exception as e:
+        print >> sys.stderr, "Unexpected error when storing message"
+        print >> sys.stderr, e
+
+if maildir:
+    mbx = mailbox.Maildir(maildir)
+    store_mail(mbx, msg)
