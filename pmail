@@ -255,7 +255,11 @@ if atts and len(atts) > 0:
     expanded = []
     for a in atts:
         a = os.path.expanduser(a)
-        expanded.extend(G.glob(a))
+        te = G.glob(a)
+        if not te:
+            print >> sys.stderr, "Warning: " + a + " not found."
+            continue
+        expanded.extend(te)
     # create and attach
     for att in expanded:
         if not os.path.isfile(att):
