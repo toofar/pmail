@@ -250,7 +250,28 @@ if atts and len(atts) > 0:
     msgmp = MIMEMultipart()
     for k in msg.keys(): # steal the headers
         msgmp[k] = msg[k]
-    msgmp.attach(MIMEText(msg.get_payload(),"plain","utf-8"))
+    from email import charset
+    # Use magic to check if 7bit clean, if so sends as us-ascii. If not
+    # quoted-printable utf8.
+    # Use the following to send raw utf8
+    #charset.add_charset('utf-8', charset.SHORTEST, None, None )
+    cs = "utf-8"
+    charset.add_charset('utf-8', charset.SHORTEST, charset.QP)
+    # This accepts chars like the copyright symbol, which is 8bit. Then sets
+    # "Content-Transfer-Encoding: 8bit", IMO 8bit ASCII makes no sense, hence
+    # we use magic library.
+    #try:
+    #    msg.get_payload().encode('ascii')
+    #except:
+    #    cs = "ascii"
+    try:
+        import magic
+        mc = magic.open(magic.MAGIC_MIME_ENCODING)
+        mc.load()
+        cs = mc.buffer(msg.get_payload())
+    except:
+        pass
+    msgmp.attach(MIMEText(msg.get_payload(),"plain",cs))
     # expand attachments paths
     expanded = []
     for a in atts:
