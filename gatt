@@ -31,7 +31,7 @@ def move_to(ofiles, out):
         if os.path.isdir(out):
             # TODO: Maybe don't need to print this out when -l --list action is
             # implemnted?
-            print "Saved to %s%s" % (out,ofiles[0][0].split('/')[-1])
+            print "Saved to %s%s" % (out+'/',ofiles[0][0].split('/')[-1])
     else:
         if os.path.exists(os.path.expanduser(out)) and not os.path.isdir(os.path.expanduser(out)):
                 print >> sys.stderr,\

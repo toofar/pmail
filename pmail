@@ -222,8 +222,11 @@ notrcpts = msg.get_all('to',failobj=[]) +\
            msg.get_all('cc',failobj=[]) +\
            msg.get_all('bcc',failobj=[])
 rcpts = []
+import re
 for r in notrcpts:
-    rcpts = rcpts + r.split(',')
+    # split on comma, but not when it is in double quotes
+    # http://stackoverflow.com/questions/2785755/
+    rcpts = rcpts + re.split(''',(?=(?:[^"]|"[^"]*")*$)''',r)
 rcpts = [x.strip() for x in rcpts]
 del msg['bcc']
 
