@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 import os
 import sys
@@ -44,6 +45,37 @@ def move_to(ofiles, out):
         for f,a in ofiles:
             shutil.copy(f, out)
 
+def tree_list(z, prefix='└'):
+    """
+    git clone git://lair.fifthhorseman.net/~dkg/printmimestructure
+    """
+    if (z.is_multipart()):
+        print prefix + '┬╴' + z.get_content_type(), z.as_string().__len__().__str__() + ' bytes'
+        if prefix.endswith('└'):
+            prefix = prefix.rpartition('└')[0] + ' '
+        if prefix.endswith('├'):
+            prefix = prefix.rpartition('├')[0] + '│'
+        parts = z.get_payload()
+        i = 0
+        while (i < parts.__len__()-1):
+            tree_list(parts[i], prefix + '├')
+            i += 1
+        tree_list(parts[i], prefix + '└')
+        # FIXME: show epilogue?
+    else:
+        fname = '' if z.get_filename() is None else ' [' + z.get_filename() + ']'
+        cset = '' if z.get_charset() is None else ' (' + z.get_charset() + ')'
+        disp = z.get_params(None, header='Content-Disposition')
+        if (disp is None):
+            disposition = ''
+        else:
+            disposition = ''
+            for d in disp:
+                if d[0] in [ 'attachment', 'inline' ]:
+                    disposition = ' ' + d[0]
+        print prefix + '─╴'+ z.get_content_type() + cset + disposition + fname, z.get_payload().__len__().__str__(), 'bytes'
+
+
 def process(in_file, tout):
     if not os.path.isfile(os.path.expanduser(in_file)):
         print >> sys.stderr, "Input file doesn't exist: %s" % os.path.expanduser(in_file)
@@ -58,6 +90,11 @@ def process(in_file, tout):
     atts = msg.get_payload()
 
     ofiles = []
+
+    if args.list and args.all:
+        tree_list(msg)
+        return ofiles
+
 
     # extract everything to a tempdir
     for a in msg.walk():
