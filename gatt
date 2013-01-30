@@ -102,7 +102,9 @@ def process(in_file, tout):
             continue
 
         # only extract application/* parts by default
-        if not args.all and a.get_content_maintype() != "application":
+        if not args.all and (a.get_content_maintype() != "application"
+                             and a.get_params([[""]],
+                              header='Content-Disposition')[0][0] != "attachment"):
             continue
 
         fname = ""
