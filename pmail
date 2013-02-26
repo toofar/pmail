@@ -320,6 +320,11 @@ from email.Utils import formatdate
 if 'date' not in msg:
     msg['Date'] = formatdate(localtime=True)
 
+# msgid added here for the same reason as date above
+from email.Utils import make_msgid
+if 'message-id' not in msg:
+    msg['Message-ID'] = make_msgid()
+
 # TODO: SSL:
 # https://github.com/wes1138/SviMTP/blob/master/after/ftplugin/mail_svimtp.vim#L221
 s = smtplib.SMTP(smtpserver, port or 25)
