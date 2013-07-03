@@ -329,7 +329,15 @@ if 'message-id' not in msg:
 # https://github.com/wes1138/SviMTP/blob/master/after/ftplugin/mail_svimtp.vim#L221
 s = smtplib.SMTP(smtpserver, port or 25)
 # TODO: Handle exceptions?
-refused = s.sendmail(from_addr, rcpts, msg.as_string())
+try:
+    refused = s.sendmail(from_addr, rcpts, msg.as_string())
+except smtplib.SMTPRecipientsRefused, e:
+    with tempfile.NamedTemporaryFile(suffix='.mail',delete=False) as temp:
+        temp.write(msg.as_string())
+        temp.flush()
+        print >>sys.stderr, "Error while sending message: %s" % e
+        print >>sys.stderr, "You can find the rejected message at",temp.name
+        exit(1)
 s.quit()
 
 if len(refused) > 0:
