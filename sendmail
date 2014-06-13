@@ -1,0 +1,121 @@
+#!/usr/bin/env python
+
+import sys, os
+import argparse
+from subprocess import call
+
+helpmsg="""Simple sendmail wrapper for pmail.
+
+Unknown arguments are ignored. Messages are read from stdin by default
+(like the sendmail -t argument). All unknown arguments that don't start
+with '-' and do contain '@' are presumed to be recepients.
+
+Delivers to SMTP server on localhost by default.
+"""
+parser = argparse.ArgumentParser(description=helpmsg,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument('dest_addr', help='Destination Address',
+                    metavar='foo@example.com', nargs='?',
+                    default=None)
+parser.add_argument('-bcc',
+                    help='BCC Address. Can be specified multiple times.',
+                    metavar='foo@example.com', action='append')
+parser.add_argument('-f', '-F',
+                    help='From address. For envelope. Sets From header '+
+                    'if absent from message.',
+                    metavar='me@example.com', dest='from_addr')
+
+args, unknown = parser.parse_known_args()
+
+if args.from_addr:
+    from_addr = args.from_addr
+else:
+    import os, pwd
+    for le in ['MAILSUSER', 'MAILUSER', 'LOGNAME', 'LOGUSER', 'USER']:
+        from_addr = os.environ.get(le, None)
+        if from_addr: break
+    if not from_addr:
+        from_addr = pwd.getpwuid(os.geteuid()).pw_name
+
+dom=None
+for le in ['MAILSHOST', 'MAILHOST']:
+    dom = os.environ.get(le, None)
+    if dom: break
+if not dom:
+    import socket
+    dom = socket.getfqdn()
+
+if '@' not in from_addr:
+    from_addr = from_addr + '@' + dom
+
+# use localhost and set exim up in a smarthost configuration.
+cmd = ['pmail', '-n', '--server', 'localhost']
+if args.bcc:
+  for x in args.bcc:
+    cmd.extend(["-b", x])
+if from_addr:
+  cmd.extend(["-f", from_addr])
+
+if args.dest_addr:
+  if '@' in args.dest_addr:
+    dest_addr = args.dest_addr
+  else:
+    dest_addr = args.dest_addr + '@' + dom
+  unknown.insert(0, dest_addr)
+
+if unknown:
+  for x in unknown:
+    if not x[0] == '-' and '@' in x:
+      cmd.extend(["-t", x])
+
+call(cmd,stdin=sys.stdin)
+
+sys.exit(0)
+
+
+"""
+# rules for envelope from (http://www.courier-mta.org/sendmail.html)
+#sendmail constructs the envelope sender (the return address), userid@host as
+#follows, unless the -bs option was specified. If the -bs option is specified
+#the envelope sender is specified via ESMTP commands, of course.
+#
+#If the -f option was specified, the address specified by the -f option is
+#  used.
+#
+#Otherwise, the userid portion of the return address is set to the contents of
+#the first environment variable that's defined from the following list:
+#MAILSUSER, MAILUSER, LOGNAME, LOGUSER. If none of these environment variables
+#are defined, the system account name is used.
+#
+#The host portion of the return address is set to the contents of the
+#MAILSHOST environment variable. If MAILSHOST is not defined, MAILHOST will be
+#used. If neither variable is set, the configured machine name is used.
+
+TODO: Construct envelope and from from the same env vars that sendmail does in
+case some script (namely script that expect local delivery) use them.
+
+# rules for From:
+#If the From: header is present in the message, but the environment variable
+#MAILUSER is set, the userid portion of the From: header is replaced by the
+#contents of MAILUSER.
+#
+#If the From: header is present in the message, but the MAILHOST environment
+#variable is set, the contents of MAILHOST replaces the host portion of the
+#From: header.
+#
+#If the From: header is present in the message, but either the -F option was
+#specified, or the MAILNAME or the NAME environment variable is set, the
+#contents of the -F option, or the environment variable, will replace the
+#sender's name in the From: header.
+#
+#If the From: header is not present in the message, one is constructed as
+#follows. The sender's name is set by the -F option. If the -F option was
+#not specified, the contents of the MAILNAME or the NAME environment
+#variable is used. If neither variable is used, the name is looked up from
+#the system account file. The userid portion of the address is set by the
+#contents of any one of the following environment variables: MAILUSER,
+#LOGNAME, USER. If none of these variables are set, the system userid is
+#used. The host portion of the address is set by the contents of the
+#MAILHOST environment variable. If it is not set, the system name of the
+#server is used.
+"""
