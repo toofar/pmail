@@ -236,7 +236,7 @@ for r in notrcpts:
     # split on comma, but not when it is in double quotes
     # http://stackoverflow.com/questions/2785755/
     rcpts = rcpts + re.split(''',(?=(?:[^"]|"[^"]*")*$)''',r)
-rcpts = [x.strip() for x in rcpts]
+rcpts = [x.strip() for x in rcpts if '@' in x]
 del msg['bcc']
 
 atts = msg.get_all('attach')
@@ -345,12 +345,18 @@ except smtplib.SMTPRecipientsRefused, e:
         temp.write(msg.as_string())
         temp.flush()
         print >>sys.stderr, "Error while sending message: %s" % e
+        print >> sys.stderr, "Recipients:",rcpts
         print >>sys.stderr, "You can find the rejected message at",temp.name
         exit(1)
 s.quit()
 
 if len(refused) > 0:
     print >> sys.stderr, "Some messages could not be delivered."
+    print >> sys.stderr, "Recipients:",rcpts
+    with tempfile.NamedTemporaryFile(suffix='.mail',delete=False) as temp:
+        temp.write(msg.as_string())
+        temp.flush()
+        print >>sys.stderr, "You can find the rejected message at",temp.name
     print >> sys.stderr, refused
 
 # save in maildir
@@ -391,3 +397,6 @@ if maildir:
             print >>sys.stderr, "Failed to store sent mail in", maildir
             print >>sys.stderr, str(e)
             exit(1)
+
+if len(refused) > 0:
+    exit(1)
