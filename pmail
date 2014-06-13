@@ -36,6 +36,8 @@ import sys
 
 # Set config
 config_file = os.path.expanduser('~/.pmailrc')
+if not os.path.exists(config_file):
+    config_file = '/etc/pmailrc'
 
 smtpserver, port, from_addr, password, maildir = False, False, False, False, False
 if os.path.isfile(config_file):
@@ -138,7 +140,14 @@ if not os.isatty(0):
     # assumes that they are headers.
     # If the first lines start with spaces, I think they are ignored.
     msg = Parser().parse(sys.stdin)
-sys.stdin = open('/dev/tty')
+
+# Now open /dev/tty so we can ask the user things etc
+if os.path.exists('/dev/tty'):
+    try:
+        sys.stdin = open('/dev/tty')
+    except IOError:
+        args.no_editor = True
+        pass
 
 #  * try to fill in message headers from the args
 #    To, From, Subject should always be present even if we haven't got
@@ -369,6 +378,16 @@ def store_mail(mbx, mail):
         print >> sys.stderr, "Unexpected error when storing message"
         print >> sys.stderr, e
 
+# TODO: user arg to try chown the mail file to?
 if maildir:
-    mbx = mailbox.Maildir(maildir)
-    store_mail(mbx, msg)
+    try:
+        mbx = mailbox.Maildir(maildir)
+        store_mail(mbx, msg)
+    except (IOError, OSError) as e:
+        if e.errno in [13]:
+            #Permission denied
+            pass
+        else:
+            print >>sys.stderr, "Failed to store sent mail in", maildir
+            print >>sys.stderr, str(e)
+            exit(1)
