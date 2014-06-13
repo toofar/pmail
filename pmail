@@ -29,6 +29,10 @@ specified mutiple times. They can both be present on the same command.
 Currently doesn't support SSL.
 """
 
+# XXX: Testing
+html=True
+markdown=False
+
 # Parse INI
 import ConfigParser
 import os
@@ -240,6 +244,7 @@ rcpts = [x.strip() for x in rcpts if '@' in x]
 del msg['bcc']
 
 atts = msg.get_all('attach')
+if not atts: atts=[]
 del msg['attach']
 
 # squash headers that can be specified multiple times. Not sure this is
@@ -250,7 +255,7 @@ for i in ['To','CC']:
         del msg[i]
         msg[i] = ", ".join(l)
 
-if atts and len(atts) > 0:
+if len(atts) > 0 or html:
     import glob as G
     import mimetypes
     from email.encoders import encode_base64
@@ -283,7 +288,70 @@ if atts and len(atts) > 0:
         cs = mc.buffer(msg.get_payload())
     except:
         pass
-    msgmp.attach(MIMEText(msg.get_payload(),"plain",cs))
+    try:
+        if html:
+            # Set this in case we fail we can still add the param for the plan
+            # mail.
+            markdown = True
+            malt = MIMEMultipart('alternative')
+            import markdown
+            # XXX: Apparently pymarkdown footnotes extension requires
+            # that footnotes are seperated by a blank line from whatever
+            # follows ... looks like it's the check for 'elif not
+            # blank_line and not DEF_RE.match(line):' in
+            # extensions/footnotes.py::detectTabbed()
+            # So just put them at the end of the block you are working on
+            # rather then the end of the doc.
+            html = markdown.markdown(msg.get_payload().decode(cs), ['extra', 'sane_lists'])
+            for a in attMsgs:
+                basename = os.path.basename(a.get_param('filename', '', 'Content-Disposition'))
+                if not basename: continue
+                # Split lines because python regex treats ^ as start of string.
+                htmll = html.split('\n')
+                for i,l in enumerate(htmll):
+                    newbody = re.sub('(<img [^>]*src=")[^"]*{}(")'.format(basename),
+                                     r"\1cid:{}\2".format(a['Content-ID']),
+                                 l)
+                    if newbody != l:
+                        htmll[i]=newbody
+                        op=a.get_params([], 'Content-Disposition')
+                        if op and op[0][0] == 'inline': continue
+                        del a['Content-Disposition']
+                        a['Content-Disposition'] = 'inline'
+                        for k, v in op:
+                            if k == 'attachment': continue
+                            a.set_param(k, v, 'Content-Disposition')
+                html="\n".join(htmll)
+            mtext=MIMEText(msg.get_payload(),"plain",cs)
+            mtext.set_param('markup', 'markdown', 'Content-Type')
+            malt.attach(mtext)
+            malt.attach(MIMEText(html,"html",cs))
+            if atts:
+                msgmp.attach(malt)
+            else:
+                msgmp = malt
+    except ImportError:
+        # Fall back to looking for system markdown or pandoc?
+        print >>sys.stderr, "Can't import pymarkdown, "+\
+        "not adding text/html part."
+
+    # Not html or html failed
+    if not msgmp.get_payload():
+        mtext=MIMEText(msg.get_payload(),"plain",cs)
+        # Content-Type: text/plain; markup=markdown to let non markdown aware
+        # clients see this part as text and others to parse it as markdown.
+        # http://blog.freron.com/2011/thoughts-on-writing-emails-using-markdown/
+        if markdown:
+            mtext.set_param('markup', 'markdown', 'Content-Type')
+        # I would like to add the format=flowed parameter (rfc3676) here too
+        # but the stupid space stuffing in the rfc doesn't go well with
+        # markdown. Either the sender has to add an extra space to all indented
+        # blocks (making *more* indentation for non f-f complient receivers) or
+        # the reciever will remove a space and break markdown parsing.
+        # Alternately I could convert all indentation to tabs, but then when
+        # people have 8 space width tabs the message will look longer than 78.
+        msgmp.attach(mtext)
+
     # expand attachments paths
     expanded = []
     for a in atts:
