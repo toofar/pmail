@@ -339,17 +339,12 @@ if flowed:
     msg.set_payload(newbody)
     msg.set_param('format', 'flowed')
 
-if attMsgs or html:
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-    msgmp = MIMEMultipart()
-    for k in msg.keys(): # steal the headers
-        if k in ['Content-Type']: continue
-        msgmp[k] = msg[k]
     from email import charset
     # Use magic to check if 7bit clean, if so sends as us-ascii. If not
     # quoted-printable utf8.
     # Use the following to send raw utf8
+    # TODO: Add a param for this? What if sending to a simple robot that
+    # doesn't have a QP decoder?
     #charset.add_charset('utf-8', charset.SHORTEST, None, None )
     cs = "utf-8"
     charset.add_charset('utf-8', charset.SHORTEST, charset.QP)
@@ -367,10 +362,28 @@ if attMsgs or html:
         cs = mc.buffer(msg.get_payload())
     except:
         pass
+    return cs
+
+if attMsgs or html:
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    # The main multipart/mixed object. Will hold any attachments and/or
+    # multipart/related body part.
+    msgmp = MIMEMultipart()
+    for k in msg.keys(): # steal the headers
+        if k in ['Content-Type']: continue
+        msgmp[k] = msg[k]
+    # Used for multipart/related body if required. See rfc2387.
+    # May have to add a type or start param but I assume any client that can
+    # handle those should have no trouble parsing the full heirarchy anyway.
+    mrel = MIMEMultipart('related')
+    cs = chardet(msg.get_payload())
     try:
         if html:
-            # Set this in case we fail we can still add the param for the plan
-            # mail.
+            # They want html add a multipart/alternative part with
+            # markdown+html in it.
+            # Set this in case we fail we can still add the param for
+            # the plan mail to mark it as markdown.
             markdown = True
             malt = MIMEMultipart('alternative')
             import markdown
@@ -400,6 +413,7 @@ if attMsgs or html:
                         for k, v in op:
                             if k == 'attachment': continue
                             a.set_param(k, v, 'Content-Disposition')
+                        mrel.attach(a)
                 html="\n".join(htmll)
             mtext=MIMEText(msg.get_payload(),"plain",cs)
             mtext.set_param('markup', 'markdown', 'Content-Type')
@@ -408,7 +422,13 @@ if attMsgs or html:
             malt.attach(mtext)
             malt.attach(MIMEText(html,"html",cs))
             if attMsgs:
-                msgmp.attach(malt)
+                if mrel.get_payload():
+                    # Put the multipart/alternative body part it the top of the
+                    # message.
+                    mrel.set_payload([malt]+mrel.get_payload())
+                    msgmp.attach(mrel)
+                else:
+                    msgmp.attach(malt)
             else:
                 msgmp = malt
     except ImportError:
@@ -428,13 +448,21 @@ if attMsgs or html:
             mtext.set_param('format', 'flowed', 'Content-Type')
         msgmp.attach(mtext)
 
-    # TODO: Put the main mesage and an atts with Content-Disposition: inline in
-    # a multipart/related.
     for aMsg in attMsgs:
+        cdparams = aMsg.get_params([], 'Content-Disposition')
+        if cdparams and cdparams[0][0] == 'inline':
+            # handled already in multipart/related
+            continue
         msgmp.attach(aMsg)
 
     # we no longer need the original msg, so just overwrite:
     msg = msgmp
+
+elif markdown:
+    msg.set_param('markup', 'markdown', 'Content-Type')
+    # Ensure quoting
+    cs = chardet(msg.get_payload())
+    msg.set_charset(cs)
 
 # Date header, the MTA should add one, but we need it for
 # archiving localy. (See below)
