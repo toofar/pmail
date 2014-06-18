@@ -38,6 +38,7 @@ flowed=False
 import ConfigParser
 import os
 import sys
+from urllib import quote
 
 # Set config
 config_file = os.path.expanduser('~/.pmailrc')
@@ -256,6 +257,57 @@ for i in ['To','CC']:
         del msg[i]
         msg[i] = ", ".join(l)
 
+# expand attachments paths
+expanded = []
+for a in atts:
+    import glob as G
+    a = os.path.expanduser(a)
+    te = G.glob(a)
+    if not te:
+        print >> sys.stderr, "Warning: " + a + " not found."
+        continue
+    expanded.extend(te)
+# create parts for later attachment
+attMsgs=[]
+for att in expanded:
+    from email.mime.base import MIMEBase
+    from email.mime.text import MIMEText
+    from email.mime.image import MIMEImage
+    from email.mime.audio import MIMEAudio
+    from email.mime.multipart import MIMEMultipart
+    from email.encoders import encode_base64
+    import mimetypes
+    from time import time
+    if not os.path.isfile(att):
+        # NOTE: this case should have been taken care of
+        # by the glob(...) above.
+        print >> sys.stderr, "Warning: " + att + " not found."
+        continue
+    ctype,encoding = mimetypes.guess_type(att)
+    if ctype is None or encoding is not None:
+        ctype = "application/octet-stream"
+    maintype,subtype = ctype.split("/",1)
+    with open(att,'rb') as f:
+        if maintype == "text":
+            aMsg = MIMEText(f.read(), _subtype=subtype)
+        elif maintype == "image":
+            aMsg = MIMEImage(f.read(), _subtype=subtype)
+        elif maintype == "audio":
+            aMsg = MIMEAudio(f.read(), _subtype=subtype)
+        else:
+            # Could fall back to magic here like with payload below.
+            aMsg = MIMEBase(maintype, subtype)
+            aMsg.set_payload(f.read())
+            encode_base64(aMsg)
+
+    aMsg.add_header('Content-Disposition', 'attachment',
+        filename=os.path.basename(att))
+    # Used for refering to message parts/attachments. See rfc2392. Ostensibly
+    # globally unique but in practice just to the current message.
+    aMsg.add_header('Content-ID',
+                    quote(os.path.basename(att))+'-'+str(int(time()))+'@'+os.uname()[1])
+    attMsgs.extend([aMsg])
+
 if flowed:
     # Add a space to an lines that already start with space or From any
     # UNQOUTED lines that start with '>'. Add a space to the
@@ -287,15 +339,9 @@ if flowed:
     msg.set_payload(newbody)
     msg.set_param('format', 'flowed')
 
-if len(atts) > 0 or html:
-    import glob as G
-    import mimetypes
-    from email.encoders import encode_base64
+if attMsgs or html:
     from email.mime.text import MIMEText
-    from email.mime.image import MIMEImage
-    from email.mime.audio import MIMEAudio
     from email.mime.multipart import MIMEMultipart
-    from email.mime.base import MIMEBase
     msgmp = MIMEMultipart()
     for k in msg.keys(): # steal the headers
         if k in ['Content-Type']: continue
@@ -361,7 +407,7 @@ if len(atts) > 0 or html:
                 mtext.set_param('format', 'flowed', 'Content-Type')
             malt.attach(mtext)
             malt.attach(MIMEText(html,"html",cs))
-            if atts:
+            if attMsgs:
                 msgmp.attach(malt)
             else:
                 msgmp = malt
@@ -382,40 +428,9 @@ if len(atts) > 0 or html:
             mtext.set_param('format', 'flowed', 'Content-Type')
         msgmp.attach(mtext)
 
-    # expand attachments paths
-    expanded = []
-    for a in atts:
-        a = os.path.expanduser(a)
-        te = G.glob(a)
-        if not te:
-            print >> sys.stderr, "Warning: " + a + " not found."
-            continue
-        expanded.extend(te)
-    # create and attach
-    for att in expanded:
-        if not os.path.isfile(att):
-            # NOTE: this case should have been taken care of
-            # by the glob(...) above.
-            print >> sys.stderr, "Warning: " + att + " not found."
-            continue
-        ctype,encoding = mimetypes.guess_type(att)
-        if ctype is None or encoding is not None:
-            ctype = "application/octet-stream"
-        maintype,subtype = ctype.split("/",1)
-        with open(att,'rb') as f:
-            if maintype == "text":
-                aMsg = MIMEText(f.read(), _subtype=subtype)
-            elif maintype == "image":
-                aMsg = MIMEImage(f.read(), _subtype=subtype)
-            elif maintype == "audio":
-                aMsg = MIMEAudio(f.read(), _subtype=subtype)
-            else:
-                aMsg = MIMEBase(maintype, subtype)
-                aMsg.set_payload(f.read())
-                encode_base64(aMsg)
-
-        aMsg.add_header('Content-Disposition', 'attachment',
-            filename=os.path.basename(att))
+    # TODO: Put the main mesage and an atts with Content-Disposition: inline in
+    # a multipart/related.
+    for aMsg in attMsgs:
         msgmp.attach(aMsg)
 
     # we no longer need the original msg, so just overwrite:
