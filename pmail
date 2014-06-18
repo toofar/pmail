@@ -362,6 +362,27 @@ if flowed:
         cs = mc.buffer(msg.get_payload())
     except:
         pass
+
+    # Make sure the mail gets quoted properly if it does end up being sent as
+    # QP. It seems that quopri encodes ' \n' as '=20' and quoprimime
+    # encodes it as ' =\n'. Ie it uses a literal space then a QP soft line
+    # break. Since then extra rfc822 hard line break follows that it
+    # sure makes the resulting message look spacious when un-decoded.
+    # These modules implement rfc1521 and rfc2045 respectively. Since
+    # 2045 obsoletes 1521 presumably that is "more correct". Upon
+    # reading rfc2045 it looks like having =20 terminate a line is
+    # perfectly legal. So to do that we can either switch on cs and
+    # manipulate the text manipulate the text part in the output of
+    # msg.as_string(), write our own QP encoder (~44 loc in the
+    # quoprimime module) or just use the old one.
+    # Some differences between these two modules for python 3 are
+    # documented here:
+    #    http://bugs.python.org/issue18022
+    if flowed:
+        import email
+        from quopri import encodestring
+        email.quoprimime.body_encode = encodestring
+
     return cs
 
 if attMsgs or html:
