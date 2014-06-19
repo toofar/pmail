@@ -29,11 +29,6 @@ specified mutiple times. They can both be present on the same command.
 Currently doesn't support SSL.
 """
 
-# XXX: Testing
-html=True
-markdown=False
-flowed=False
-
 # Parse INI
 import ConfigParser
 import os
@@ -112,6 +107,29 @@ parser.add_argument('-e','--editor', help='Open message in editor before '+
                     metavar='myeditor', nargs='?', default='default')
 parser.add_argument('-n','--no-editor', help="Don't open an editor if the "+
                     "message is missing a required value."
+                    , action='store_true', default=False)
+
+# Formatting options. Off by default but turned on by default when the editor
+# is opened. Notes:
+# Assume most people will want to see HTML mail.
+# Those who want to see plaintext email will probably appreciate being told it
+# is markdown if their MUA supports it, otherwise they won't care.
+# Flowed is trickier because not many MUAs support it (right?) and
+# because it requires adding a space to lines that are already indented
+# which may make markdown messages look weird if the MUA doesn't support
+# it.
+parser.add_argument('--html', help="Parse the message body as "+
+                    "markdown and use that to create a markdown+html"+
+                    "multipart message."
+                    , action='store_true', default=False)
+parser.add_argument('--markdown', help="Mark the message body as "+
+                    "markdown."
+                    , action='store_true', default=False)
+parser.add_argument('--flowed', help="Mark and format the message body as "+
+                    "format=flowed (see rfc3676)."
+                    , action='store_true', default=False)
+parser.add_argument('--no-qp', help="Don't format non 7 bit clean (utf8) "+
+                    "body parts as Quoted-Printabl, uses '8bit' instead."
                     , action='store_true', default=False)
 
 args = parser.parse_args()
@@ -200,6 +218,9 @@ def can_send(msg, args):
 
 import tempfile
 if not args.no_editor and (not can_send(msg, args) or args.editor != 'default'):
+    # Since we are being called by a user give them another chance to
+    # (un)set the formatting options.
+    msg['Format']='qp,markdown,html,flowed'
     from subprocess import call
     import tempfile
     with tempfile.NamedTemporaryFile(suffix='.mail') as temp:
@@ -212,6 +233,24 @@ if not args.no_editor and (not can_send(msg, args) or args.editor != 'default'):
             exit(0)
         temp.seek(0)
         msg = Parser().parse(temp)
+    format_opts = reduce(sum, [k.split(",") for k, v in msg.get_params([], 'Format')])
+    del msg['Format']
+    if 'html' in format_opts:
+        args.html = True
+    else:
+        args.html = False
+    if 'markdown' in format_opts:
+        args.markdown = True
+    else:
+        args.markdown = False
+    if 'flowed' in format_opts:
+        args.flowed = True
+    else:
+        args.flowed = False
+    if 'qp' in format_opts:
+        args.no_qp = False
+    else:
+        args.no_qp = True
 
 if not from_addr:
     if 'from' in msg:
@@ -308,7 +347,7 @@ for att in expanded:
                     quote(os.path.basename(att))+'-'+str(int(time()))+'@'+os.uname()[1])
     attMsgs.extend([aMsg])
 
-if flowed:
+if args.flowed:
     # Add a space to an lines that already start with space or From any
     # UNQOUTED lines that start with '>'. Add a space to the
     # end of text lines in a block except for the last one.
@@ -343,11 +382,11 @@ if flowed:
     # Use magic to check if 7bit clean, if so sends as us-ascii. If not
     # quoted-printable utf8.
     # Use the following to send raw utf8
-    # TODO: Add a param for this? What if sending to a simple robot that
-    # doesn't have a QP decoder?
-    #charset.add_charset('utf-8', charset.SHORTEST, None, None )
     cs = "utf-8"
-    charset.add_charset('utf-8', charset.SHORTEST, charset.QP)
+    if args.no_qp:
+        charset.add_charset('utf-8', charset.SHORTEST, None, None )
+    else:
+        charset.add_charset('utf-8', charset.SHORTEST, charset.QP)
     # This accepts chars like the copyright symbol, which is 8bit. Then sets
     # "Content-Transfer-Encoding: 8bit", IMO 8bit ASCII makes no sense, hence
     # we use magic library.
@@ -378,14 +417,14 @@ if flowed:
     # Some differences between these two modules for python 3 are
     # documented here:
     #    http://bugs.python.org/issue18022
-    if flowed:
+    if args.flowed:
         import email
         from quopri import encodestring
         email.quoprimime.body_encode = encodestring
 
     return cs
 
-if attMsgs or html:
+if attMsgs or args.html:
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
     # The main multipart/mixed object. Will hold any attachments and/or
@@ -400,12 +439,12 @@ if attMsgs or html:
     mrel = MIMEMultipart('related')
     cs = chardet(msg.get_payload())
     try:
-        if html:
+        if args.html:
             # They want html add a multipart/alternative part with
             # markdown+html in it.
             # Set this in case we fail we can still add the param for
             # the plan mail to mark it as markdown.
-            markdown = True
+            args.markdown = True
             malt = MIMEMultipart('alternative')
             import markdown
             # XXX: Apparently pymarkdown footnotes extension requires
@@ -438,7 +477,7 @@ if attMsgs or html:
                 html="\n".join(htmll)
             mtext=MIMEText(msg.get_payload(),"plain",cs)
             mtext.set_param('markup', 'markdown', 'Content-Type')
-            if flowed:
+            if args.flowed:
                 mtext.set_param('format', 'flowed', 'Content-Type')
             malt.attach(mtext)
             malt.attach(MIMEText(html,"html",cs))
@@ -463,9 +502,9 @@ if attMsgs or html:
         # Content-Type: text/plain; markup=markdown to let non markdown aware
         # clients see this part as text and others to parse it as markdown.
         # http://blog.freron.com/2011/thoughts-on-writing-emails-using-markdown/
-        if markdown:
+        if args.markdown:
             mtext.set_param('markup', 'markdown', 'Content-Type')
-        if flowed:
+        if args.flowed:
             mtext.set_param('format', 'flowed', 'Content-Type')
         msgmp.attach(mtext)
 
@@ -479,7 +518,7 @@ if attMsgs or html:
     # we no longer need the original msg, so just overwrite:
     msg = msgmp
 
-elif markdown:
+elif args.markdown:
     msg.set_param('markup', 'markdown', 'Content-Type')
     # Ensure quoting
     cs = chardet(msg.get_payload())
