@@ -309,7 +309,7 @@ for a in atts:
 # create parts for later attachment
 attMsgs=[]
 for att in expanded:
-    from email.mime.base import MIMEBase
+    from email.mime.nonmultipart import MIMENonMultipart
     from email.mime.text import MIMEText
     from email.mime.image import MIMEImage
     from email.mime.audio import MIMEAudio
@@ -322,9 +322,23 @@ for att in expanded:
         # by the glob(...) above.
         print >> sys.stderr, "Warning: " + att + " not found."
         continue
+    # The python email-examples put the type as application/octet-stream
+    # when encoding is not none because the file is encoded or
+    # compressed. Presumably to get round spam filters? I don't see why
+    # we shouldn't set a type of application/x-tar if that's what it is.
+    # Especially because the only type of attachment I know of getting blocked
+    # (exe) doesn't return an encoding here.
     ctype,encoding = mimetypes.guess_type(att)
-    if ctype is None or encoding is not None:
+    if ctype is None:
         ctype = "application/octet-stream"
+        # Fall back to the magic module, if present.
+        try:
+            import magic
+            mc = magic.open(magic.MAGIC_MIME_TYPE)
+            mc.load()
+            ctype = mc.file(att)
+        except:
+            pass
     maintype,subtype = ctype.split("/",1)
     with open(att,'rb') as f:
         if maintype == "text":
@@ -334,8 +348,7 @@ for att in expanded:
         elif maintype == "audio":
             aMsg = MIMEAudio(f.read(), _subtype=subtype)
         else:
-            # Could fall back to magic here like with payload below.
-            aMsg = MIMEBase(maintype, subtype)
+            aMsg = MIMENonMultipart(maintype, subtype)
             aMsg.set_payload(f.read())
             encode_base64(aMsg)
 
