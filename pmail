@@ -391,6 +391,7 @@ if args.flowed:
     msg.set_payload(newbody)
     msg.set_param('format', 'flowed')
 
+def chardet(payload):
     from email import charset
     # Use magic to check if 7bit clean, if so sends as us-ascii. If not
     # quoted-printable utf8.
