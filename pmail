@@ -233,6 +233,8 @@ if not args.no_editor and (not can_send(msg, args) or args.editor != 'default'):
             exit(0)
         temp.seek(0)
         msg = Parser().parse(temp)
+
+if 'Format' in msg:
     format_opts = reduce(sum, [k.split(",") for k, v in msg.get_params([], 'Format')])
     del msg['Format']
     if 'html' in format_opts:
