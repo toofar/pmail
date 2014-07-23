@@ -446,9 +446,6 @@ if attMsgs or args.html:
     # The main multipart/mixed object. Will hold any attachments and/or
     # multipart/related body part.
     msgmp = MIMEMultipart()
-    for k in msg.keys(): # steal the headers
-        if k in ['Content-Type']: continue
-        msgmp[k] = msg[k]
     # Used for multipart/related body if required. See rfc2387.
     # May have to add a type or start param but I assume any client that can
     # handle those should have no trouble parsing the full heirarchy anyway.
@@ -511,6 +508,10 @@ if attMsgs or args.html:
         # Fall back to looking for system markdown or pandoc?
         print >>sys.stderr, "Can't import pymarkdown, "+\
         "not adding text/html part."
+
+    for k in msg.keys(): # steal the headers
+        if k in ['Content-Type']: continue
+        msgmp[k] = msg[k]
 
     # Not html or html failed
     if not msgmp.get_payload():
