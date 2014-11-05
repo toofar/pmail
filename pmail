@@ -100,7 +100,9 @@ parser.add_argument('-f', '--from',
                     'if absent from message.'+
                     ' Overrides pmailrc.', metavar='me@example.com',
                     dest='from_addr')
-parser.add_argument('--server', help='SMTP server hostname. Overrides pmailrc',
+parser.add_argument('-S', '--server', help='SMTP server hostname. Overrides pmailrc. '+
+                    'No TLS/STARTTLS support for now. Use \'-\' to output the '+
+                    'entire message to stdout.',
                     metavar='smtp.example.com[:124]')
 parser.add_argument('-e','--editor', help='Open message in editor before '+
                     'sending. Even if all the required values are present.',
@@ -164,6 +166,16 @@ if not os.isatty(0):
     # assumes that they are headers.
     # If the first lines start with spaces, I think they are ignored.
     msg = Parser().parse(sys.stdin)
+    # To handle reading multiple messages to send on stdin we would have to
+    # 1) change most of the script to be a loop (and the exits to be
+    #    continues
+    # 2) read stdin to a buffer and try parse it with mailbox.mbox and
+    #    fall back to Parser (or split on ^From ourself, I think not)
+    # 3) O
+    if msg.get_unixfrom():
+        print >> sys.stderr, "Fatal: Sorry, can't handle reading mbox format."
+        print >> sys.stderr, "If it is actually just a single message try removeing the unix from line."
+        sys.exit(1)
 
 # Now open /dev/tty so we can ask the user things etc
 if os.path.exists('/dev/tty'):
@@ -177,6 +189,11 @@ if os.path.exists('/dev/tty'):
 #    To, From, Subject should always be present even if we haven't got
 #    values for them yet. This way thay will show up in the editor.
 
+# TODO: Maybe if dest_addr is provided but msg['To'] already exists then don't
+# overwrite it, just use it as smtp RCPT TO arg.
+# Yes I think make --to map to the To header and positional args map to
+# rcpts for the smtp server. Which wont be passed on when writing to
+# stdout.
 if args.dest_addr:
     msg['To'] = ", ".join(args.dest_addr)
 if 'to' not in msg:
@@ -552,21 +569,25 @@ from email.Utils import make_msgid
 if 'message-id' not in msg:
     msg['Message-ID'] = make_msgid()
 
-# TODO: SSL:
-# https://github.com/wes1138/SviMTP/blob/master/after/ftplugin/mail_svimtp.vim#L221
-s = smtplib.SMTP(smtpserver, port or 25)
-# TODO: Handle exceptions?
-try:
-    refused = s.sendmail(from_addr, rcpts, msg.as_string())
-except smtplib.SMTPRecipientsRefused, e:
-    with tempfile.NamedTemporaryFile(suffix='.mail',delete=False) as temp:
-        temp.write(msg.as_string())
-        temp.flush()
-        print >>sys.stderr, "Error while sending message: %s" % e
-        print >> sys.stderr, "Recipients:",rcpts
-        print >>sys.stderr, "You can find the rejected message at",temp.name
-        exit(1)
-s.quit()
+refused=[]
+if smtpserver == '-':
+    sys.stdout.write(msg.as_string())
+else:
+    # TODO: SSL:
+    # https://github.com/wes1138/SviMTP/blob/master/after/ftplugin/mail_svimtp.vim#L221
+    s = smtplib.SMTP(smtpserver, port or 25)
+    # TODO: Handle exceptions?
+    try:
+        refused = s.sendmail(from_addr, rcpts, msg.as_string())
+    except smtplib.SMTPRecipientsRefused, e:
+        with tempfile.NamedTemporaryFile(suffix='.mail',delete=False) as temp:
+            temp.write(msg.as_string())
+            temp.flush()
+            print >>sys.stderr, "Error while sending message: %s" % e
+            print >> sys.stderr, "Recipients:",rcpts
+            print >>sys.stderr, "You can find the rejected message at",temp.name
+            exit(1)
+    s.quit()
 
 if len(refused) > 0:
     print >> sys.stderr, "Some messages could not be delivered."
